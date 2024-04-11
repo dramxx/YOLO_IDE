@@ -2,7 +2,6 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use iced::executor;
 use iced::widget::{
     button, 
     container, 
@@ -14,8 +13,10 @@ use iced::widget::{
     tooltip,
     pick_list
 };
-use iced::{Command, Application, Element, Length, Settings, Theme, Font};
+use iced::{Command, Application, Subscription, Element, Length, Settings, Theme, Font};
 use iced::theme;
+use iced::executor;
+use iced::keyboard;
 use iced::highlighter::{self, Highlighter};
 
 fn main() -> iced::Result {
@@ -33,6 +34,7 @@ struct Editor {
     path: Option<PathBuf>,
     content: text_editor::Content,
     theme: highlighter::Theme,
+    is_dirty: bool,
     error: Option<Error>
 }
 
@@ -65,6 +67,7 @@ impl Application for Editor {
                 path: None,
                 content: text_editor::Content::new(),
                 theme: highlighter::Theme::SolarizedDark,
+                is_dirty: true,
                 error: None
             },
             Command::perform(
@@ -81,6 +84,7 @@ impl Application for Editor {
     fn update(&mut self, message: Message) -> Command<Message> {
         match message {
             Message::Edit(action) => {
+                self.is_dirty = self.is_dirty || action.is_edit();
                 self.content.edit(action);
                 self.error = None;
 
@@ -90,7 +94,8 @@ impl Application for Editor {
             Message::New => {
                 self.path = None;
                 self.content = text_editor::Content::new();
-
+                self.is_dirty = true;
+                
                 Command::none()
             }
 
@@ -101,6 +106,7 @@ impl Application for Editor {
             Message::FileOpened(Ok((path, content))) => {
                 self.path = Some(path);
                 self.content = text_editor::Content::with(&content);
+                self.is_dirty = false;
 
                 Command::none()
             }
@@ -119,6 +125,7 @@ impl Application for Editor {
 
             Message::FileSaved(Ok(path)) => {
                 self.path = Some(path);
+                self.is_dirty = false;
 
                 Command::none()
             }
@@ -138,11 +145,20 @@ impl Application for Editor {
        }
     }
 
+    fn subscription(&self) -> Subscription<Message> {
+        keyboard::on_key_press(|key_code, modifiers| {
+            match key_code {
+                keyboard::KeyCode::S if modifiers.command() => Some(Message::Save),
+                _ => None
+            }
+        })
+    }
+
     fn view(&self) -> Element<'_, Message> {
         let controls = row![
-            action(new_icon(), "New file", Message::New),
-            action(open_icon(), "Open file", Message::Open),
-            action(save_icon(), "Save file", Message::Save),
+            action(new_icon(), "New file", Some(Message::New)),
+            action(open_icon(), "Open file", Some(Message::Open)),
+            action(save_icon(), "Save file", self.is_dirty.then_some(Message::Save)),
             horizontal_space(Length::Fill),
             pick_list(highlighter::Theme::ALL, Some(self.theme), Message::ThemeChanged)
         ].spacing(10);
@@ -201,13 +217,22 @@ impl Application for Editor {
     }
 }
 
-fn action<'a>(content: Element<'a, Message>, label: &str, message: Message) -> Element<'a, Message> {
+fn action<'a>(content: Element<'a, Message>, label: &str, message: Option<Message>) -> Element<'a, Message> {
+    let is_disabled = message.is_none();
+    
     tooltip(
         button(container(content)
             .width(30)
             .center_x())
-            .on_press(message)
-            .padding([5, 10]),
+            .on_press_maybe(message)
+            .padding([5, 10])
+            .style(
+                if is_disabled {
+                    theme::Button::Secondary
+                } else {
+                    theme::Button::Primary
+                }
+            ),
         label,
         tooltip::Position::FollowCursor
     ).style(theme::Container::Box).into()
