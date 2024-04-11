@@ -3,11 +3,27 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use iced::executor;
-use iced::widget::{button, container, text_editor, text, column, row, horizontal_space};
-use iced::{Command, Application, Element, Length, Settings, Theme};
+use iced::widget::{
+    button, 
+    container, 
+    text_editor, 
+    text, 
+    column, 
+    row, 
+    horizontal_space, 
+    tooltip
+};
+use iced::{Command, Application, Element, Length, Settings, Theme, Font};
+use iced::theme;
 
 fn main() -> iced::Result {
-    Editor::run(Settings::default())
+    Editor::run(Settings {
+        fonts: vec![include_bytes!("../fonts/controls-icons.ttf")
+            .as_slice()
+            .into()
+        ],
+        ..Settings::default()
+    })
 }
 
 struct Editor {
@@ -19,14 +35,17 @@ struct Editor {
 #[derive(Debug, Clone)]
 enum Message {
     Edit(text_editor::Action),
+    New,
     Open,
-    FileOpened(Result<(PathBuf, Arc<String>), Error>)
+    Save,
+    FileOpened(Result<(PathBuf, Arc<String>), Error>),
+    FileSaved(Result<PathBuf, Error>)
 }
 
 #[derive(Debug, Clone)]
 enum Error {
     DialogClosed,
-    IO(io::ErrorKind)
+    IOFailed(io::ErrorKind)
 }
 
 impl Application for Editor {
@@ -57,6 +76,14 @@ impl Application for Editor {
         match message {
             Message::Edit(action) => {
                 self.content.edit(action);
+                self.error = None;
+
+                Command::none()
+            }
+
+            Message::New => {
+                self.path = None;
+                self.content = text_editor::Content::new();
 
                 Command::none()
             }
@@ -77,32 +104,60 @@ impl Application for Editor {
 
                 Command::none()
             }
+
+            Message::Save => {
+                let text = self.content.text();
+
+                Command::perform(save_file(self.path.clone(), text), Message::FileSaved)
+            }
+
+            Message::FileSaved(Ok(path)) => {
+                self.path = Some(path);
+
+                Command::none()
+            }
+
+            Message::FileSaved(Err(error)) => {
+                self.error = Some(error);
+
+                Command::none()
+            }
+
        }
     }
 
     fn view(&self) -> Element<'_, Message> {
         let controls = row![
-            button("Open").on_press(Message::Open)
-        ];
+            action(new_icon(), "New file", Message::New),
+            action(open_icon(), "Open file", Message::Open),
+            action(save_icon(), "Save file", Message::Save)
+        ].spacing(10);
 
         let input = text_editor(&self.content)
             .on_edit(Message::Edit);
 
-        let file_path = match self.path.as_deref().and_then(Path::to_str) {
-            Some(path) => text(path).size(14),
-            None => text("")
-        };
 
-        let position = {
-            let (line, column) = self.content.cursor_position();
-            text(format!("{}:{}", line + 1, column + 1))
-        };
+        let status_bar = {
+            let status = if let Some(Error::IOFailed(error)) = self.error.as_ref() {
+                text(error.to_string())
+            } else {
+                match self.path.as_deref().and_then(Path::to_str) {
+                    Some(path) => text(path).size(14),
+                    None => text("New file")
+                }
+            };
 
-        let status_bar = row![
-            file_path,
-            horizontal_space(Length::Fill), 
-            position
-        ];
+            let position = {
+                let (line, column) = self.content.cursor_position();
+                text(format!("{}:{}", line + 1, column + 1))
+            };
+
+            row![
+                status,
+                horizontal_space(Length::Fill), 
+                position
+            ]
+        };
         
         container(column![
             controls,
@@ -115,6 +170,37 @@ impl Application for Editor {
         Theme::Dark
     }
 }
+
+fn action<'a>(content: Element<'a, Message>, label: &str, message: Message) -> Element<'a, Message> {
+    tooltip(
+        button(container(content)
+            .width(30)
+            .center_x())
+            .on_press(message)
+            .padding([5, 10]),
+        label,
+        tooltip::Position::FollowCursor
+    ).style(theme::Container::Box).into()
+}
+
+fn new_icon<'a>() -> Element<'static, Message> {
+    icon('\u{F0F6}')
+}
+
+fn open_icon<'a>() -> Element<'static, Message> {
+    icon('\u{F115}')
+}
+
+fn save_icon<'a>() -> Element<'static, Message> {
+    icon('\u{E800}')
+}
+
+fn icon<'a, Message>(codepoint: char) -> Element<'a, Message> {
+    const ICON_FONT: Font = Font::with_name("controls-icons");
+
+    text(codepoint).font(ICON_FONT).into()
+}
+
 
 fn default_file() -> PathBuf {
     PathBuf::from(
@@ -138,7 +224,24 @@ async fn load_file(path: PathBuf) -> Result<(PathBuf, Arc<String>), Error> {
         .await
         .map(Arc::new)
         .map_err(|error| error.kind())
-        .map_err(Error::IO)?;
+        .map_err(Error::IOFailed)?;
 
     Ok((path, contents))
+}
+
+async fn save_file(path: Option<PathBuf>, text: String) -> Result<PathBuf, Error> {
+    let path = if let Some(path) = path { path } else {
+        rfd::AsyncFileDialog::new()
+            .set_title("Choose a file name")
+            .save_file()
+            .await
+            .ok_or(Error::DialogClosed)
+            .map(|handle| handle.path().to_owned())?
+    }; 
+
+    tokio::fs::write(&path, text)
+        .await
+        .map_err(|error| Error::IOFailed(error.kind()))?;
+
+    Ok(path)
 }
