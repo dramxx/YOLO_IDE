@@ -13,7 +13,7 @@ use iced::widget::{
     tooltip,
     pick_list
 };
-use iced::{Command, Application, Subscription, Element, Length, Settings, Theme, Font};
+use iced::{Command, Application, Subscription, Element, Settings, Theme, Font};
 use iced::theme;
 use iced::executor;
 use iced::keyboard;
@@ -85,7 +85,7 @@ impl Application for Editor {
         match message {
             Message::Edit(action) => {
                 self.is_dirty = self.is_dirty || action.is_edit();
-                self.content.edit(action);
+                self.content.perform(action);
                 self.error = None;
 
                 Command::none()
@@ -105,7 +105,7 @@ impl Application for Editor {
 
             Message::FileOpened(Ok((path, content))) => {
                 self.path = Some(path);
-                self.content = text_editor::Content::with(&content);
+                self.content = text_editor::Content::with_text(&content);
                 self.is_dirty = false;
 
                 Command::none()
@@ -148,7 +148,7 @@ impl Application for Editor {
     fn subscription(&self) -> Subscription<Message> {
         keyboard::on_key_press(|key_code, modifiers| {
             match key_code {
-                keyboard::KeyCode::S if modifiers.command() => Some(Message::Save),
+                keyboard::Key::Character(_s) if modifiers.command() => Some(Message::Save),
                 _ => None
             }
         })
@@ -159,12 +159,12 @@ impl Application for Editor {
             action(new_icon(), "New file", Some(Message::New)),
             action(open_icon(), "Open file", Some(Message::Open)),
             action(save_icon(), "Save file", self.is_dirty.then_some(Message::Save)),
-            horizontal_space(Length::Fill),
+            horizontal_space(),
             pick_list(highlighter::Theme::ALL, Some(self.theme), Message::ThemeChanged)
         ].spacing(10);
 
         let input = text_editor(&self.content)
-            .on_edit(Message::Edit)
+            .on_action(Message::Edit)
             .highlight::<Highlighter>(
                 highlighter::Settings {
                     theme: self.theme,
@@ -196,7 +196,7 @@ impl Application for Editor {
 
             row![
                 status,
-                horizontal_space(Length::Fill), 
+                horizontal_space(), 
                 position
             ]
         };
@@ -217,7 +217,7 @@ impl Application for Editor {
     }
 }
 
-fn action<'a>(content: Element<'a, Message>, label: &str, message: Option<Message>) -> Element<'a, Message> {
+fn action<'a>(content: Element<'a, Message>, label: &'a str, message: Option<Message>) -> Element<'a, Message> {
     let is_disabled = message.is_none();
     
     tooltip(
