@@ -46,7 +46,9 @@ enum Message {
     Save,
     FileOpened(Result<(PathBuf, Arc<String>), Error>),
     FileSaved(Result<PathBuf, Error>),
-    ThemeChanged(highlighter::Theme)
+    ThemeChanged(highlighter::Theme),
+    TabPressed,
+    SelectAll
 }
 
 #[derive(Debug, Clone)]
@@ -92,6 +94,11 @@ impl Application for Editor {
             }
 
             Message::New => {
+                if self.is_dirty {
+                    self.error = Some(Error::DialogClosed);
+                    return Command::none();
+                }
+
                 self.path = None;
                 self.content = text_editor::Content::new();
                 self.is_dirty = true;
@@ -142,13 +149,28 @@ impl Application for Editor {
                 Command::none()
             }
 
+            Message::TabPressed => {
+                //TODO: Implement tab insertion
+                
+                Command::none()
+            }
+
+            Message::SelectAll => {
+                //TODO: Implement select all text in editor
+
+                Command::none()
+            }
        }
     }
 
     fn subscription(&self) -> Subscription<Message> {
         keyboard::on_key_press(|key_code, modifiers| {
             match key_code {
-                keyboard::Key::Character(_s) if modifiers.command() => Some(Message::Save),
+                keyboard::Key::Character(key) if key == "s" && modifiers.command() => Some(Message::Save),
+                keyboard::Key::Character(key) if key == "o" && modifiers.command() => Some(Message::Open),
+                keyboard::Key::Character(key) if key == "n" && modifiers.command() => Some(Message::New),
+                keyboard::Key::Character(key) if key == "a" && modifiers.command() => Some(Message::SelectAll),
+                keyboard::Key::Named(keyboard::key::Named::Tab) => Some(Message::TabPressed),
                 _ => None
             }
         })
@@ -275,13 +297,10 @@ async fn pick_file() -> Result<(PathBuf, Arc<String>), Error>{
 }
 
 async fn load_file(path: PathBuf) -> Result<(PathBuf, Arc<String>), Error> {
-    let mut contents = tokio::fs::read_to_string(&path)
+    let contents = tokio::fs::read_to_string(&path)
         .await
         .map_err(|error| error.kind())
         .map_err(Error::IOFailed)?;
-
-    //TODO: Remove trailing newline, still not sure why is this bug happening
-    contents = contents.replace("\n", "");
 
     Ok((path, Arc::new(contents)))
 }
