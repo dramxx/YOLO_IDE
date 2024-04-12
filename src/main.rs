@@ -275,13 +275,15 @@ async fn pick_file() -> Result<(PathBuf, Arc<String>), Error>{
 }
 
 async fn load_file(path: PathBuf) -> Result<(PathBuf, Arc<String>), Error> {
-    let contents = tokio::fs::read_to_string(&path)
+    let mut contents = tokio::fs::read_to_string(&path)
         .await
-        .map(Arc::new)
         .map_err(|error| error.kind())
         .map_err(Error::IOFailed)?;
 
-    Ok((path, contents))
+    //TODO: Remove trailing newline, still not sure why is this bug happening
+    contents = contents.replace("\n", "");
+
+    Ok((path, Arc::new(contents)))
 }
 
 async fn save_file(path: Option<PathBuf>, text: String) -> Result<PathBuf, Error> {
